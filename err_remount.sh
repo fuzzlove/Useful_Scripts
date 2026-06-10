@@ -1,80 +1,46 @@
+cat > /var/mobile/err_remount_fix.sh <<'EOF'
 #!/bin/sh
-# fix_err_remount_ios.sh
 
-echo "=== iOS ERR_REMOUNT repair attempt ==="
+echo "[*] ERR_REMOUNT safe fixer for Taurine"
+echo "[*] This will NOT delete /private/preboot or wipe user data."
 
-if [ "$(id -u)" != "0" ]; then
-  echo "[-] Not root. Run as root:"
-  echo "    su"
-  echo "    sh fix_err_remount_ios.sh"
-  exit 1
-fi
+echo "[*] Checking root..."
+id
 
-echo "[+] Detecting shell..."
-echo "Shell: ${SHELL:-unknown}"
+echo "[*] Saving diagnostics..."
+mkdir -p /var/mobile/err_remount_logs
+mount > /var/mobile/err_remount_logs/mount.txt 2>&1
+df -h > /var/mobile/err_remount_logs/df.txt 2>&1
+ls -la /private/preboot > /var/mobile/err_remount_logs/preboot.txt 2>&1
+ls -la /var/MobileSoftwareUpdate > /var/mobile/err_remount_logs/mobile_update.txt 2>&1
+ls -la /var/db/softwareupdate > /var/mobile/err_remount_logs/db_update.txt 2>&1
+ls -ld /var/jb /.procursus_strapped /private/var/jb > /var/mobile/err_remount_logs/jb_state.txt 2>&1
 
-echo "[+] Killing update / install daemons..."
-killall -9 softwareupdated 2>/dev/null
-killall -9 mobileassetd 2>/dev/null
-killall -9 installd 2>/dev/null
-killall -9 otaupdated 2>/dev/null
-killall -9 nsurlsessiond 2>/dev/null
+echo "[*] Removing OTA update leftovers..."
+rm -rf /var/MobileSoftwareUpdate/*
+rm -rf /private/var/MobileSoftwareUpdate/*
+rm -rf /var/db/softwareupdate/*
+rm -rf /var/db/SoftwareUpdate/*
+rm -rf /var/mobile/Library/Preferences/com.apple.MobileSoftwareUpdate.plist
 
-echo "[+] Removing OTA/update leftovers..."
+echo "[*] Removing Taurine app caches/log state only..."
+rm -rf /var/mobile/Library/Caches/*taurine* 2>/dev/null
+rm -rf /var/mobile/Library/Caches/*Taurine* 2>/dev/null
+rm -rf /var/mobile/Library/Logs/*taurine* 2>/dev/null
+rm -rf /var/mobile/Library/Logs/*Taurine* 2>/dev/null
 
-for p in \
-  /var/MobileSoftwareUpdate \
-  /var/mobile/Library/SoftwareUpdate \
-  /var/db/softwareupdate \
-  /var/db/SoftwareUpdate \
-  /private/var/MobileSoftwareUpdate \
-  /private/var/mobile/Library/SoftwareUpdate \
-  /private/var/db/softwareupdate \
-  /private/var/db/SoftwareUpdate
-do
-  if [ -e "$p" ]; then
-    echo "    Moving $p"
-    mv "$p" "$p.bak.$(date +%s)" 2>/dev/null || rm -rf "$p"
-  fi
-done
+echo "[*] Clearing uicache if available..."
+uicache -a 2>/dev/null || true
 
-echo "[+] Removing MobileAsset update cache..."
-find /var/MobileAsset -maxdepth 3 \( \
-  -iname "*softwareupdate*" -o \
-  -iname "*ota*" -o \
-  -iname "*com_apple_MobileAsset_SoftwareUpdate*" \
-\) -print -exec rm -rf {} \; 2>/dev/null
+echo "[*] Attempting ldrestart..."
+ldrestart 2>/dev/null || true
 
-echo "[+] Recreating clean SoftwareUpdate dirs..."
-mkdir -p /var/mobile/Library/SoftwareUpdate
-mkdir -p /var/db/softwareupdate
-chown -R mobile:mobile /var/mobile/Library/SoftwareUpdate 2>/dev/null
-chmod 755 /var/mobile/Library/SoftwareUpdate 2>/dev/null
+echo
+echo "[+] Done."
+echo "[!] Now FULLY reboot the iPad."
+echo "[!] Then reinstall latest Taurine and try Restore RootFS first."
+echo "[!] Logs saved in: /var/mobile/err_remount_logs"
+EOF
 
-echo "[+] Trying remount methods..."
-
-mount -uw / 2>/dev/null && echo "[+] mount -uw / succeeded" || echo "[!] mount -uw / failed"
-
-if command -v /sbin/mount_apfs >/dev/null 2>&1; then
-  /sbin/mount_apfs -o rw / 2>/dev/null && echo "[+] mount_apfs rw succeeded" || true
-fi
-
-if command -v launchctl >/dev/null 2>&1; then
-  echo "[+] Reloading update services..."
-  launchctl kickstart -k system/com.apple.mobile.softwareupdated 2>/dev/null
-  launchctl kickstart -k system/com.apple.mobileassetd 2>/dev/null
-fi
-
-echo "[+] Checking root mount:"
-mount | grep " on / " || mount | head -20
-
-echo "[+] Syncing..."
-sync
-
-echo ""
-echo "=== Finished ==="
-echo "Now reboot fully, delete any iOS update from Settings > General > iPhone Storage, then try jailbreak again."
-echo ""
-echo "Run with fish/Filza/SSH like this:"
-echo "    su"
-echo "    sh fix_err_remount_ios.sh"
+chmod +x /var/mobile/err_remount_fix.sh
+sh /var/mobile/err_remount_fix.sh
